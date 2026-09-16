@@ -1,0 +1,10 @@
+# Generated simulation output
+results/
+
+# MATLAB editor and autosave files
+*.asv
+*.m~
+*.mlx~
+
+# Operating-system files
+.DS_Store

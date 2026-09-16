@@ -1,0 +1,20 @@
+cff-version: 1.2.0
+message: "If you use this teaching package, please cite the repository and the upstream MathWorks courseware."
+title: "Airfoil One-Way FSI in MATLAB"
+type: software
+version: 0.1.0
+date-released: 2026-09-17
+license: BSD-3-Clause
+abstract: "A classroom-oriented MATLAB case for low-Reynolds-number airfoil flow and one-way structural response."
+keywords:
+  - CFD
+  - aerodynamics
+  - immersed boundary method
+  - fluid-structure interaction
+  - MATLAB
+references:
+  - type: software
+    title: "Computational Fluid Dynamics Course Module"
+    authors:
+      - name: "The MathWorks, Inc."
+    url: "https://github.com/MathWorks-Teaching-Resources/Computational-Fluid-Dynamics"
