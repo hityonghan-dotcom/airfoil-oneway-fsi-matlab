@@ -1,12 +1,24 @@
-function [polar,cases] = run_airfoil_lab(mode)
-% Run from this folder: run_airfoil_lab('smoke') or run_airfoil_lab('demo').
-if nargin==0, mode='demo'; end
-cfg=teaching_config(mode);
+function [polar,cases] = run_airfoil_lab(modeOrConfig)
+%RUN_AIRFOIL_LAB Angle-of-attack sweep using either a named mode or a config.
+%
+% Examples:
+%   run_airfoil_lab('demo')              % supplied classroom case
+%   cfg = teaching_config('demo');       % customise cfg.alphaDeg, then:
+%   run_airfoil_lab(cfg)
+if nargin==0, modeOrConfig='demo'; end
+if isstruct(modeOrConfig)
+    cfg=modeOrConfig;
+    mode=cfg.mode;
+else
+    mode=modeOrConfig;
+    cfg=teaching_config(mode);
+end
 folder=fullfile(fileparts(mfilename('fullpath')),'results',mode);
 if ~exist(folder,'dir'), mkdir(folder); end
 cfg.gridPreviewFolder=folder;
 cases=cell(numel(cfg.alphaDeg),1); data=zeros(numel(cases),13);
 for k=1:numel(cases)
+    % Each incidence is a separate fixed-geometry CFD calculation.
     r=solve_airfoil_ns(cfg,cfg.alphaDeg(k));
     r.dynamics=wing_dynamics(cfg,r); cases{k}=r;
     data(k,:)=[r.alphaDeg,r.CL,r.CD,r.CM,r.CLstd,r.CDstd, ...

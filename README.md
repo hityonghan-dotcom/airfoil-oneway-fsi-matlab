@@ -25,12 +25,16 @@ The default case is two-dimensional, laminar, and `Re = 100`. It omits transitio
 Open MATLAB in this folder and run:
 
 ```matlab
+run_student_case('smoke')         % beginner entry point; edit student_case_config.m
+run_student_case('demo')          % classroom-resolution single case
+lesson_02_angle_sweep('demo')     % prescribed angle-of-attack sweep
 check_lab                         % fast numerical and symmetry checks
-[polar,cases] = run_airfoil_lab('demo')
 run_video_demo(8)                % transient fixed-geometry CFD video
 run_oneway_motion_demo(8)        % one-way structural-motion video
 run_sensitivity                  % optional numerical sensitivity study
 ```
+
+Students should begin with `student_case_config.m`, which contains the flow, geometry, grid, and structural quantities intended for modification. `airfoil_solver.m` is the public solver interface; the numerical implementation remains in `solve_airfoil_ns.m`. The bilingual [solver guide](SOLVER_GUIDE.md) explains the governing equations, MAC-grid discretisation, Brinkman immersed boundary, force extraction, one-way coupling boundary, and a ten-slide lecture sequence.
 
 Every solve creates `grid_preview_alpha_*.png` before time marching. The left panel shows the Cartesian pressure grid. The right panel zooms into the airfoil and displays the `u`-face Brinkman mask and the staggered `u`/`v` locations.
 
@@ -84,6 +88,10 @@ The sequence is therefore `fixed-geometry CFD -> aerodynamic load history -> str
 | File | Purpose |
 | --- | --- |
 | `teaching_config.m` | All physical, numerical, structural, and output parameters. |
+| `student_case_config.m` | The only configuration file beginners edit for one physical case. |
+| `run_student_case.m` | Short student workflow: configure, solve, save, and inspect output. |
+| `airfoil_solver.m` | Public input/output contract, analogous to a C/C++ solver header. |
+| `SOLVER_GUIDE.md` | Bilingual equations, numerical-method guide, teaching flow, and PPT outline. |
 | `solve_airfoil_ns.m` | MAC-grid flow solver, Brinkman penalization, projection, and load extraction. |
 | `plot_grid_preview.m` | Grid and immersed-boundary preview generated before each solve. |
 | `run_airfoil_lab.m` | Angle-of-attack sweep and static publication-style figures. |

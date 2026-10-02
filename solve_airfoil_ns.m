@@ -1,18 +1,34 @@
 function r = solve_airfoil_ns(cfg,alphaDeg)
+%SOLVE_AIRFOIL_NS Fixed-airfoil CFD, load extraction, and static load transfer.
+%
+% Read this function in five passes:
+%   1. Lines below "GRID AND FIXED GEOMETRY": make the MAC grid and chi masks.
+%   2. "INITIAL CONDITION": choose dt, eta, the pressure matrix, and the inlet state.
+%   3. "TIME MARCH": predict momentum, apply Brinkman penalty, then project.
+%   4. "AERODYNAMIC LOADS": turn the penalty reaction into L', D', and M'.
+%   5. "REPORT": average the late-time window and package the result.
+%
+% The CFD geometry is fixed throughout this function.  The final call to
+% WING_STRUCTURE uses the mean loads only; it never changes u, v, p, or chi.
+%
 % Adapted staggered-grid momentum discretization from MathWorks courseware.
 % Copyright (c) 2025, The MathWorks, Inc. All rights reserved.
 % See vendor/mathworks-cfd/LICENSE (BSD-3-Clause).
 % Extensions: airfoil mask, implicit Brinkman constraint, variable-coefficient
 % pressure projection, and force/moment output.
+
+%% 1. GRID AND FIXED GEOMETRY
 nx=cfg.nx; ny=cfg.ny; dx=cfg.Lx/nx; dy=cfg.Ly/ny;
 assert(abs(dx-dy)<1e-12,'This case requires dx = dy; scale nx and ny together.');
 assert(cfg.avgStart<cfg.endTime && cfg.avgStart>=0);
 dt0=cfg.dtScale*min([0.15*dx/cfg.U,0.20*dx^2/cfg.nu]);
 nt=ceil(cfg.endTime/dt0); dt=cfg.endTime/nt; eta=cfg.etaRatio*dt;
 [xb,yb]=airfoil_geometry(cfg,alphaDeg);
-% u is ny-by-(nx+1); v is (ny+1)-by-nx. Full arrays include one ghost layer.
+% u is ny-by-(nx+1), v is (ny+1)-by-nx, and p is ny-by-nx.
+% The arrays u and v below also carry a one-cell ghost layer for boundary conditions.
 [xu,yu]=meshgrid(0:dx:cfg.Lx,dy/2:dy:cfg.Ly-dy/2);
 [xv,yv]=meshgrid(dx/2:dx:cfg.Lx-dx/2,0:dy:cfg.Ly);
+% chi is the volume fraction occupied by the fixed solid at each velocity face.
 chiU=fraction(xu,yu,xb,yb,dx,dy,cfg.subcells);
 chiV=fraction(xv,yv,xb,yb,dx,dy,cfg.subcells);
 if isfield(cfg,'makeGridPreview') && cfg.makeGridPreview
@@ -25,6 +41,9 @@ if isfield(cfg,'makeGridPreview') && cfg.makeGridPreview
     previewFile=fullfile(previewFolder,sprintf('grid_preview_alpha_%g.png',alphaDeg));
     plot_grid_preview(cfg,alphaDeg,xb,yb,chiU,chiV,previewFile);
 end
+
+%% 2. INITIAL CONDITION AND PRESSURE PROJECTION
+% The implicit factor a=1/(1+dt*chi/eta) is the Brinkman no-slip step.
 aU=1./(1+dt*chiU/eta); aV=1./(1+dt*chiV/eta);
 [A,solver]=pressure_matrix(aU,aV,dx,dy,nx,ny);
 u=cfg.U*ones(ny+2,nx+2); v=zeros(ny+2,nx+2);
@@ -45,12 +64,21 @@ if record
     snapshots.V=zeros(ny,nx,capacity,'single');
     ns=0; nextSnapshot=0;
 end
+
+%% 3. TIME MARCH: MOMENTUM PREDICTION -> PENALTY -> PRESSURE PROJECTION
 for n=1:nt
+    % (a) Apply outer boundary conditions and remember the previous face velocities.
     [u,v]=outer_bc(u,v,cfg.U,nx,ny);
     uprev=u(2:ny+1,2:nx+2); vprev=v(2:ny+2,2:nx+1);
+
+    % (b) Momentum prediction: convection and diffusion, before pressure and penalty.
     % Retain the upstream central interpolation, conservative convection, and diffusion stencil.
     [uh,vh]=intermediateVelocity(u,v,u,v,rho,rho*cfg.nu,nx,ny,dx,dy,dt);
+
+    % (c) Implicit Brinkman step.  In a solid face chi=1, this drives velocity to u_s=0.
     us=aU.*uh(2:ny+1,2:nx+2); vs=aV.*vh(2:ny+2,2:nx+1);
+
+    % (d) Projection: solve pressure, then subtract its staggered gradient.
     rhs=(diff(us,1,2)/dx+diff(vs,1,1)/dy)*rho/dt;
     pvec=solver\(-rhs(:)); pc=reshape(pvec,ny,nx);
     gpU=zeros(ny,nx+1); gpV=zeros(ny+1,nx);
@@ -59,7 +87,10 @@ for n=1:nt
     gpV(2:ny,:)=diff(pc,1,1)/dy;
     un=us-dt/rho*aU.*gpU; vn=vs-dt/rho*aV.*gpV;
     u(2:ny+1,2:nx+2)=un; v(2:ny+2,2:nx+1)=vn;
-    % Solid-on-fluid penalty force; reaction load includes virtual-fluid momentum correction.
+
+    %% 4. AERODYNAMIC LOADS FROM THE IMMERSED-BOUNDARY REACTION
+    % f is force applied to the virtual fluid by the fixed body.
+    % q is the equal-and-opposite body load, including virtual-fluid momentum correction.
     fx=-rho/eta*chiU.*un; fy=-rho/eta*chiV.*vn;
     qx=-fx+rho*chiU.*(un-uprev)/dt;
     qy=-fy+rho*chiV.*(vn-vprev)/dt;
@@ -94,6 +125,8 @@ for n=1:nt
             alphaDeg,n*dt,cfg.endTime,CL,CD,hist(n,5));
     end
 end
+
+%% 5. REPORT: LATE-TIME MEAN FLOW, COEFFICIENTS, AND ONE-WAY STATIC RESPONSE
 select=hist(:,1)>=cfg.avgStart;
 r.alphaDeg=alphaDeg; r.history=hist; r.dt=dt; r.eta=eta;
 r.CL=mean(hist(select,2)); r.CD=mean(hist(select,3)); r.CM=mean(hist(select,4));
@@ -118,6 +151,8 @@ end
 end
 
 function chi=fraction(x,y,xb,yb,dx,dy,ns)
+% Estimate the solid fraction at a velocity face by ns-by-ns point sampling.
+% This makes the stair-step Cartesian body boundary less abrupt than a binary mask.
 chi=zeros(size(x)); offsets=((1:ns)-0.5)/ns-0.5;
 for i=offsets
     for j=offsets
@@ -128,6 +163,7 @@ end
 
 function [A,solver]=pressure_matrix(aU,aV,dx,dy,nx,ny)
 % -div(a grad) is symmetric positive definite: inlet/top/bottom Neumann, outlet Dirichlet.
+% Cell identifiers let the finite-volume stencil be assembled as a sparse matrix.
 id=reshape(1:nx*ny,ny,nx); N=nx*ny;
 i=id(:,1:end-1); j=id(:,2:end); w=aU(:,2:nx)/dx^2;
 I=[i(:);j(:);i(:);j(:)]; J=[i(:);j(:);j(:);i(:)]; W=[w(:);w(:);-w(:);-w(:)];
@@ -139,6 +175,7 @@ solver=decomposition(A,'chol');
 end
 
 function [u,v]=outer_bc(u,v,U,nx,ny)
+% Uniform inlet, extrapolated outlet, and zero normal velocity at top/bottom.
 u(:,2)=U; u(:,1)=U;
 % Outlet extrapolation supports the next momentum prediction; projection updates outlet velocity.
 u(:,nx+2)=u(:,nx+1);
